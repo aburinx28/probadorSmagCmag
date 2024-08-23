@@ -344,7 +344,6 @@ static void gotoState (fsmState_t nextState)
 {
 	fsmState_previous = fsmState;
 	fsmState = nextState;
-	
 	stateIn = false;
 	stateOut = true;
 }
