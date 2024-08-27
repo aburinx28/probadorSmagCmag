@@ -79,5 +79,6 @@
 */
 #define IMAN_ENT	PIN_PA17 // Verificar sacar R7 en hardware
 #define IMAN_SAL	PIN_PA16 // Verificar sacar R30 en hardware
-
+#define SMAG_ENT	PIN_PA08 // Board I/O 1
+#define CMAG_ENT	PIN_PA09 // Board I/O 2
 #endif // CONF_BOARD_H

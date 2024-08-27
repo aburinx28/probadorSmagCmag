@@ -16,22 +16,21 @@ static void init_pins (void);
 int main (void)
 {
 	uint8_t dataH, dataL, dataLayer;
+	debouncePin_t botonSmag;
+	debouncePin_t botonCmag;
 	
 	system_init();
 	init_pins();
 	mpxh_init();
 	displayRAM_init();
 	mainTimer_init();
-	
-	/* Anteriormente dependía de botonserializar pero no lo voy a usar más */
+	debouncePin_init(&botonSmag, DEBOUNCE_PIN_BAJO_ACTIVO, SMAG_ENT);
+	debouncePin_init(&botonCmag, DEBOUNCE_PIN_BAJO_ACTIVO, CMAG_ENT);
+
 	testerFsm_init();
 	
 	while (1) 
-	{
-				
-		//serialClientPC_handler();
-		//&serialClient4038_handler();
-				
+	{				
 		if (mainTimer_expired(TIMER_4MSEG)) 
 		{
 			maintTimer_clearExpired(TIMER_4MSEG);
@@ -63,8 +62,9 @@ int main (void)
 			/*****************************************************************************/
 			//  HANDLERS
 			/*****************************************************************************/
-			
-			// debouncePin_handler(&botonSerializar);
+			debouncePin_handler (&botonSmag);
+			debouncePin_handler (&botonCmag);
+			getFinCarrera(&botonCmag, &botonSmag); // Se realiza el debounce de las teclas fisicas de los fines de carrera
 			testerFsm_handler();
 						
 			/*****************************************************************************/
@@ -104,7 +104,6 @@ int main (void)
 				}
 			}
 		}
-		
 		/* Se pone un '0' en el pin DUTY_PAL para indicar que terminó la rutina de 4 segundos de código */
 		/* Para tener un testigo para testear de manera externa con otro dispositivo					*/		
 		port_pin_set_output_level(DUTY_PAL, false);
@@ -126,6 +125,8 @@ static void init_pins (void)
 	port_pin_set_config(POWER_FEED, &pin_conf);
 	// port_pin_set_config(BOTON_SERIALIZAR, &pin_conf);
 	port_pin_set_config(IMAN_ENT,&pin_conf);
+	port_pin_set_config(SMAG_ENT,&pin_conf);
+	port_pin_set_config(CMAG_ENT,&pin_conf);
 	
 	/* Configuración de pines como salida */
 	

@@ -13,8 +13,7 @@ void debouncePin_init ( debouncePin_t* gpio, uint8_t nivelActivo, uint8_t pin )
 
 
 void debouncePin_handler (debouncePin_t* gpio)
-{
-    
+{ 
     if ( port_pin_get_input_level(gpio->pin) == 1)
     {
 		if (gpio->cont <= 4)
