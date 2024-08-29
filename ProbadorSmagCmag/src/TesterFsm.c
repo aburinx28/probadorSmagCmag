@@ -18,14 +18,14 @@
 #define CONTADOR_EVENTOS_MIN	2
 #define SHORT_CIRCUIT_COUNTER	2
 // Variable utilizada para recorrer el menú de seleccion de devices
-#define CANTIDAD_MAXIMA_DEVICES		4 // Para recorrer el array necesito contemplar el 0 como "cantidad_minima_devices"
+#define CANTIDAD_MAXIMA_DEVICES		5 // Para recorrer el array necesito contemplar el 0 como "cantidad_minima_devices"
 #define CANTIDAD_MINIMA_DEVICES		0
 
 typedef enum{
 	FSM_INIT = 0,
 	FSM_ESPERANDO_START,
 	FSM_ALIMENTAR_DUT,
-	FSM_ESPERANDO_PIRU, // Es a lo que llamamos BEGIN manda el 0D2 y espera respuesta, prueba de MPXH
+	FSM_ESPERANDO_090, // Es a lo que llamamos BEGIN manda el 0D2 y espera respuesta, prueba de MPXH
 	FSM_TERMINAR_PRUEBA,
 	FSM_ERROR,
 	/* Estas son nuevos estados que agrego para testeo */ 
@@ -66,6 +66,13 @@ typedef struct {
 	bool dispo_correcto;					// Variable booleana 'dispo_correcto'
 	bool tiempo_expirado;
 	bool corto_circuito;
+	bool error_prueba_tamper;
+	bool error_recepcion_trama;
+	bool tiempo_expirado_check_dispo;
+	bool tiempo_expirado_check_tamper;
+	bool tiempo_expirado_check_magnet;
+	bool tiempo_expirado_check_090;
+	bool no_dispo;
 } Info;
 
 // Variable enum que indica en que dispositivo me encuentro actualmente analizando
@@ -75,7 +82,8 @@ typedef enum {
 	SOS = 2,
 	SMP = 3,
 	GEC = 4,
-	SMAGE = 5
+	SMAGE = 5,
+	UNDEFINED = 6
 } ActualDevice;
 
 static fsmState_t fsmState;
@@ -113,8 +121,8 @@ static uint8_t producto;
 static uint8_t bg96Signal = 0;
 static uint8_t shortCircuitCounter = 0;
 static uint8_t recorrer_devices = CANTIDAD_MINIMA_DEVICES;
-
-
+static Info info;
+static ActualDevice actualDevice = UNDEFINED; // Inicialmente actualDevice va a ser por defecto para la prueba de SMAG
 static void gotoState (fsmState_t nextState);
 static void errorPowerFeed (void);
 static void display_productName (uint8_t pos);
@@ -124,29 +132,34 @@ static void showProductOK2 (void);
 /**************************************************************/
 // Displays para el TLCD
 /**************************************************************/
-//												 0             1516             31
-//												 |              ||              |
-const uint8_t display_comenzando_prueba[] =     "   COMENZANDO      PRUEBA...";
-const uint8_t display_error_corto[] =           "     ERROR           CORTO";
-const uint8_t display_error_mpxh[] =            "     ERROR           MPXH";									
-const uint8_t display_iniciando[]			=   "    INICIANDO       PROBADOR    ";
-const uint8_t display_selec_device[]		=   "SELEC. DISPO.                   ";
-const uint8_t display_smag[]				=	"SELEC. DISPO.   SMAG            ";
-const uint8_t display_cmag[]				=	"SELEC. DISPO.   CMAG            ";
-const uint8_t display_sos[]					=	"SELEC. DISPO.   SOS             ";
-const uint8_t display_smp[]					=	"SELEC. DISPO.   SMP             ";
-const uint8_t display_gec[]					=	"SELEC. DISPO.   GEC             ";
-const uint8_t display_smage[]				=	"SELEC. DISPO.   SMAGE           ";
-const uint8_t display_test_magnet[]			=	"      TEST          MAGNETICO    ";
-const uint8_t display_test_tamper[]			=	"      TEST            TAMPER     ";
-const uint8_t display_error_magnet[]		=   "      ERROR         MAGNETICO    ";
-const uint8_t display_error_device[]		=   "   DISPOSITIVO      INCORRECTO   ";
-const uint8_t display_error_iman_separado[]	=   "ERROR APAGADO DE IMAN           ";
-const uint8_t display_error_iman_junto[]	=   "ERROR ENCENDIDO DE IMAN         ";
-const uint8_t display_error_default[]		=	"ERROR DEFAULT  ";
-const uint8_t display_test_exitoso[]		=	"TEST OK! OPRIMA START O CHANGE  ";
-const uint8_t display_error_recepcion_trama[] =	"ERROR RECEPCION TRAMA           ";
-const uint8_t display_error_tamper[]		=   "ERROR TAMPER			         ";
+//															0             1516             31
+//															|              ||              |
+const uint8_t display_comenzando_prueba[]				=   "   COMENZANDO      PRUEBA...    ";
+const uint8_t display_error_corto[]						=   "     ERROR           CORTO      ";
+const uint8_t display_error_mpxh[]						=   "     ERROR           MPXH		 ";									
+const uint8_t display_iniciando[]						=   "    INICIANDO       PROBADOR    ";
+const uint8_t display_selec_device[]					=   "SELECCIONAR    DISPOSITIVO      ";
+const uint8_t display_smag[]							=	"SELEC. DISPO.   SMAG          ud";
+const uint8_t display_cmag[]							=	"SELEC. DISPO.   CMAG          ud";
+const uint8_t display_sos[]								=	"SELEC. DISPO.   SOS           ud";
+const uint8_t display_smp[]								=	"SELEC. DISPO.   SMP           ud";
+const uint8_t display_gec[]								=	"SELEC. DISPO.   GEC           ud";
+const uint8_t display_smage[]							=	"SELEC. DISPO.   SMAGE         ud";
+const uint8_t display_test_magnet[]						=	"     TEST          MAGNETICO    ";
+const uint8_t display_test_tamper[]						=	"     TEST            TAMPER     ";
+const uint8_t display_error_magnet[]					=   "     ERROR         MAGNETICO    ";
+const uint8_t display_error_device[]					=   "DISPOSITIVO     INCORRECTO      ";
+const uint8_t display_error_iman_separado[]				=   "ERROR APAGADO   DE IMAN         ";
+const uint8_t display_error_iman_junto[]				=   "ERROR ENCENDIDO DE IMAN         ";
+const uint8_t display_error_default[]					=	"ERROR DEFAULT					 ";
+const uint8_t display_test_exitoso[]					=	"TEST OK! OPRIMA START O CHANGE  ";
+const uint8_t display_error_recepcion_trama[]			=	"ERROR RECEPCION TRAMA           ";
+const uint8_t display_error_tamper[]					=   "ERROR TAMPER			         ";
+const uint8_t display_tiempo_expirado_check_dispo[]		=   "ERROR TIMEOUT   CHECK DISPO     ";
+const uint8_t display_tiempo_expirado_check_tamper[]	=	"ERROR TIMEOUT   CHEKC TAMPER    ";
+const uint8_t display_tiempo_expirado_check_magnet[]	=	"ERROR TIMEOUT   CHECK MAGNETICO ";
+const uint8_t display_tiempo_expirado_check_090[]		=	"ERROR TIMEOUT   CHECK 090       ";
+const uint8_t display_no_dispo[]						=	"NO SE DETECTA   DISPOSITIVO     ";
 
 // Array de punteros a cadenas de caracteres. La idea es recorrerla con un valor incremental.
 const uint8_t* display_messages[] = {
@@ -192,7 +205,7 @@ void testerFsm_analizarMpxh (uint8_t dataH, uint8_t dataL, uint8_t layer, uint8_
 				else if (dataH == 0x61 && dataL == 0x10) {				// 611 - Tecla Down
 					vinoTeclaDown = true;
 				}
-				else if (dataH == 0x00 && dataL == 0x0F) {				// 00F - Tecla Fire - Tecla otherDevice
+				else if (dataH == 0x00 && dataL == 0xF0) {				// 00F - Tecla Fire - Tecla Change
 					vinoChange = true;
 				}
 				else if (dataH == 0x14 && dataL == 0x10) {				//  - Iman Junto al sensor
@@ -204,7 +217,7 @@ void testerFsm_analizarMpxh (uint8_t dataH, uint8_t dataL, uint8_t layer, uint8_
 				else if (dataH == 0x21 && dataL == 0xA0) {				// - Tamper activado
 					vinoTamper = true;
 				}
-				else if(dataH == 0x00 && dataL == 0x90)
+				else if(dataH == 0x09 && dataL == 0x00)
 				{
 					/* Si detecta el mensaje de la familia de SMAG 0090 entonces empieza a escuchar la respuesta
 					para asegurarnos de que device se trata.
@@ -224,12 +237,15 @@ void testerFsm_analizarMpxh (uint8_t dataH, uint8_t dataL, uint8_t layer, uint8_
 					if (dataH == ID_SMAG_PGA_15BITS_MPXH) 
 					{
 						vinoIdSmag = true;
+						actualDevice = SMAG;
 					}else if (dataH == ID_SOS_PGA_15BITS_MPXH) 
 					{
 						vinoIdSos = true;
+						actualDevice = SOS;
 					}else if (dataH == ID_GEC_PGA_15BITS_MPXH) 
 					{
 						vinoIdGec = true;
+						actualDevice = GEC;
 					}
 					detected0090 = false; // Reseteo el estado después de procesar		
 				}
@@ -237,7 +253,7 @@ void testerFsm_analizarMpxh (uint8_t dataH, uint8_t dataL, uint8_t layer, uint8_
 			
 		/* Agrego un caso de default en caso de error */
 		default:
-				display_error = display_error_recepcion_trama;
+				info.error_recepcion_trama = true; 
 				gotoState(FSM_ERROR);
 			break;
 	}
@@ -246,10 +262,10 @@ void testerFsm_analizarMpxh (uint8_t dataH, uint8_t dataL, uint8_t layer, uint8_
 void testerFsm_handler (void)
 {
 	uint8_t i;
-	Info info;
+	//Info info;
 	
-	// Inicialmente actualDevice va a ser por defecto para la prueba de SMAG
-	ActualDevice actualDevice = SMAG;
+	//// Inicialmente actualDevice va a ser por defecto para la prueba de SMAG
+	//ActualDevice actualDevice = SMAG;
 	
 	/* Se analiza la variable fsm_state de la máquina de estados */
 	switch (fsmState) 
@@ -260,7 +276,7 @@ void testerFsm_handler (void)
 					stateIn = false;
 					stateOut = false;
 				
-					softTimer_init(&timerState, 1000);
+					softTimer_init(&timerState, 2000);
 					displayRAM_cargarDR(display_iniciando, 0);
 					displayRAM_cargarComando(TLCD_PERMANENT);
 				}
@@ -283,11 +299,12 @@ void testerFsm_handler (void)
 				{
 					stateIn = false;
 					stateOut = false;
-					softTimer_init(&timerState, 1000);
+					softTimer_init(&timerState, 3000);
 
 					/* Cargo primer pantalla del menú*/
-					displayRAM_cargarDR(display_selec_device, 0); // Layer = 0 - Renglon 1
-					displayRAM_cargarDR(display_messages[recorrer_devices], 0); // Layer = 1 - Renglon 2	
+					//displayRAM_cargarDR(display_selec_device, 0); // Layer = 0
+					recorrer_devices = CANTIDAD_MINIMA_DEVICES; // Vuelve al device inicial
+					displayRAM_cargarDR(display_messages[recorrer_devices], 0); // Layer = 1	
 					displayRAM_cargarComando(TLCD_PERMANENT);
 				}
 				/**********************************************************************************************/
@@ -316,6 +333,9 @@ void testerFsm_handler (void)
 					{
 						recorrer_devices++;	
 					}
+					/* Actualizo el display segun la tecla que se haya presionado, osea el device elegido */
+					displayRAM_cargarDR(display_messages[recorrer_devices], 0);
+					displayRAM_cargarComando(TLCD_PERMANENT);
 				}else if (vinoTeclaDown && !vinoTeclaUp && !vinoStart ) 
 				{ /*Evalua tecla Down mientras los otros comandos estén precionados */			
 					vinoTeclaDown = false;			
@@ -326,10 +346,11 @@ void testerFsm_handler (void)
 					{
 						recorrer_devices--;
 					}
+					/* Actualizo el display segun la tecla que se haya presionado, osea el device elegido */
+					displayRAM_cargarDR(display_messages[recorrer_devices], 0);
+					displayRAM_cargarComando(TLCD_PERMANENT);
 				}						
-				/* Actualizo el display segun la tecla que se haya presionado, osea el device elegido */
-				displayRAM_cargarDR(display_messages[recorrer_devices], 0);
-				displayRAM_cargarComando(TLCD_PERMANENT);			
+							
 				/**********************************************************************************************/
 				if (stateOut)
 				{
@@ -343,26 +364,33 @@ void testerFsm_handler (void)
 				{
 					stateIn = false;
 					stateOut = false;
-                
+					
+					port_pin_set_output_level(POWER, true); // Alimento el dispositivo
+					                
+					comandos1.bits.mandar_0d2 = 1; // Envío al device que se ponga en modo prueba
+					comandos1.bits.mandar_beep = 1; // Sonido beep
+					
 					displayRAM_cargarDR(display_comenzando_prueba, 0);
-					displayRAM_cargarComando(TLCD_PERMANENT);
-					port_pin_set_output_level(POWER, true);
-					softTimer_init(&timerState, 2000);
+					displayRAM_cargarComando(TLCD_PERMANENT);	
+					
+					softTimer_init(&timerState, 1000);
 					shortCircuitCounter = 0;
 				}
 				/**********************************************************************************************/
 				if (port_pin_get_input_level(POWER_FEED) == false) 
 				{
-					shortCircuitCounter ++;
+					shortCircuitCounter++;
 				
 					if (shortCircuitCounter >= SHORT_CIRCUIT_COUNTER)
+					{
 						errorPowerFeed(); // La funcion errorPowerFeed() arma el error para mostrar en display la falla.
+					}
 				}
 				else if (softTimer_expired(&timerState)) 
 				{
 					// Se limpia el buffer donde se recibe el 4038 porque hasta este momento estuvo
 					// desalimentado y probablemente se recibió basura.
-					gotoState(FSM_ESPERANDO_PIRU);
+					gotoState(FSM_ESPERANDO_090);
 				}
 				/**********************************************************************************************/
 				if (stateOut)
@@ -372,17 +400,18 @@ void testerFsm_handler (void)
 				}
 			break;
 			
-		case FSM_ESPERANDO_PIRU:
+		case FSM_ESPERANDO_090:
 				if (stateIn)
 				{
 					stateIn = false;
 					stateOut = false;
 				
-					comandos1.bits.mandar_0d2 = 1; // Envío al device que se ponga en modo prueba
-					vinoPiruPiru = false;
+					//comandos1.bits.mandar_0d2 = 1; // Envío al device que se ponga en modo prueba
+					//vinoPiruPiru = false;
+					//detected0090 = false;
 					shortCircuitCounter = 0;
 				
-					softTimer_init(&timerState, 2000);
+					softTimer_init(&timerState, 1000);
 				}
 				/**********************************************************************************************/
 				if (port_pin_get_input_level(POWER_FEED) == false) 
@@ -394,13 +423,16 @@ void testerFsm_handler (void)
 				}
 				else if (softTimer_expired(&timerState)) 
 				{
-					display_error = display_error_mpxh;
+					//display_error = display_error_mpxh;
+					//gotoState(FSM_ERROR);
+					info.tiempo_expirado_check_090 = true;
 					gotoState(FSM_ERROR);
 				}
-				else if (vinoPiruPiru) 
+				else if ( actualDevice != UNDEFINED ) // Espero que se analice el mensaje mpxh
 				{
 					/* Si recibo una respuesta entonces es que funciona el cable mpxh */
 					/* Accion que tenga que hacer */
+					
 					gotoState(FSM_CORROBORO_DISPOSITIVO);
 				}
 				/**********************************************************************************************/
@@ -428,15 +460,21 @@ void testerFsm_handler (void)
 						errorPowerFeed();
 				}else if (softTimer_expired(&timerState)) 
 				{
-					display_error = display_error_mpxh;
+					//display_error = display_error_mpxh;
+					info.tiempo_expirado_check_dispo = true;
 					gotoState(FSM_ERROR);
+					
 				}else
 				{
-					switch (actualDevice) 
+					/* Harcodeo flags */
+					finCarreraCmag = true;
+					finCarreraSmag = false;
+					
+					switch (recorrer_devices) 
 					{
 						case SMAG:
 								/* Corroboro el Id del Smag */
-								if (vinoIdSmag == true && finCarreraCmag == false && finCarreraSmag == true)
+								if ( vinoIdSmag == true && finCarreraCmag == false && finCarreraSmag == true && actualDevice == recorrer_devices )
 								{
 									info.dispo_correcto = true;
 									gotoState(FSM_TESTEO_MAGNETICO);
@@ -445,7 +483,7 @@ void testerFsm_handler (void)
 					
 						case CMAG:
 								/* Corroboro el Id del Cmag */
-								if (vinoIdSmag == true && finCarreraCmag == true && finCarreraSmag == false)
+								if ( vinoIdSmag == true && finCarreraCmag == true && finCarreraSmag == false && actualDevice == SMAG )
 								{
 									info.dispo_correcto = true;
 									gotoState(FSM_TESTEO_MAGNETICO);
@@ -454,7 +492,7 @@ void testerFsm_handler (void)
 					
 						case SOS:
 								/* Corroboro el Id del Sos */
-								if (vinoIdSos)
+								if ( vinoIdSos && actualDevice == recorrer_devices )
 								{
 									info.dispo_correcto = true;
 									gotoState(FSM_TESTEO_MAGNETICO);
@@ -463,7 +501,7 @@ void testerFsm_handler (void)
 					
 						case SMP:
 								/* Corroboro el Id del Smp */
-								if (vinoIdSmag == true && finCarreraCmag == false && finCarreraSmag == false) /*TODO: Completar*/
+								if ( vinoIdSmag == true && finCarreraCmag == false && finCarreraSmag == false && actualDevice == SMAG ) 
 								{
 									info.dispo_correcto = true;
 									gotoState(FSM_TESTEO_MAGNETICO);
@@ -472,7 +510,7 @@ void testerFsm_handler (void)
 					
 						case SMAGE:
 								/* Corroboro el Id del Smage */
-								if (vinoIdSmag == true && finCarreraCmag == false && finCarreraSmag == false)
+								if ( vinoIdSmag == true && finCarreraCmag == false && finCarreraSmag == false && actualDevice == SMAG )
 								{
 									info.dispo_correcto = true;
 									gotoState(FSM_TESTEO_MAGNETICO);
@@ -481,7 +519,7 @@ void testerFsm_handler (void)
 					
 						case GEC:
 								/* Corroboro el Id del Gec */
-								if (vinoIdGec)
+								if ( vinoIdGec && actualDevice == recorrer_devices )
 								{
 									info.dispo_correcto = true;
 									gotoState(FSM_TESTEO_MAGNETICO); /*TODO: El GEC manda un codigo en un evento especial*/
@@ -490,8 +528,16 @@ void testerFsm_handler (void)
 						
 						/* Caso default no es el dispositivo correcto */
 						default:
-								display_error = display_error_device;
-								info.dispo_correcto = false;
+								//display_error = display_error_device;
+								if( actualDevice == UNDEFINED)
+								{
+									info.no_dispo = true;	
+								}
+								else
+								{
+									info.dispo_correcto = false;	
+								}
+								
 								gotoState(FSM_ERROR);
 							break;
 					}							
@@ -510,12 +556,12 @@ void testerFsm_handler (void)
 					stateIn = false;
 					stateOut = false;
 				
-					softTimer_init(&timerState, 2000);
-				
 					/* Cargo pantalla del estado testeo de magnetico */
 					displayRAM_cargarDR(display_test_magnet, 0);
-			
 					displayRAM_cargarComando(TLCD_PERMANENT);
+					comandos1.bits.mandar_beep = 1; // Sonido beep
+					
+					softTimer_init(&timerState, 5000);
 					port_pin_set_output_level(IMAN_ENT, true);			// Enciendo el electroimán				
 				}
 				/**********************************************************************************************/
@@ -526,40 +572,43 @@ void testerFsm_handler (void)
 					errorPowerFeed();	
 				}else if (softTimer_expired(&timerState)) 
 				{
-					display_error = display_error_mpxh;
-					gotoState(FSM_ERROR);
-				}else{
+					//display_error = display_error_mpxh;
+					//info.tiempo_expirado = true;
+					info.tiempo_expirado_check_magnet = true;						
+					gotoState(FSM_ERROR);	
+				}
+				else
+				{
 					/* Detecta Magnético? se recibe codigo 141 ( se juntó ) o 121( se separó )? */
 					port_pin_set_output_level(IMAN_ENT, true);			// Enciendo el electroimán - repito la acción
-					if (vinoJunto)	/* Recibo el valor 0141 - Corroboro la recepción */
-					{
-						port_pin_set_output_level(IMAN_ENT, false);		// Apago el electroimán	
-					}else if(vinoSeparado && vinoJunto) /* Recibo el valor 0121, y si estaba el 0141 significa que dió ok */
+					if (vinoJunto && !vinoSeparado)	/* Recibo el valor 0141 - Corroboro la recepción */
 					{
 						vinoJunto = false;
+						comandos1.bits.mandar_beep = 1; // Sonido beep
+						port_pin_set_output_level(IMAN_ENT, false);		// Apago el electroimán	
+					}
+					else if( !vinoJunto && vinoSeparado) /* Recibo el valor 0121, y si estaba el 0141 significa que dió ok */
+					{
+						//vinoJunto = false;
 						vinoSeparado = false;
 						contador_eventos++;
+						comandos1.bits.mandar_beep = 1; // Sonido beep
 						if(contador_eventos >= CONTADOR_EVENTOS_MIN) // Con que sea mayor a 2 eventos se toma como válido
 						{
 							info.prueba_exitosa_iman = true;
 							contador_eventos = 0; // Reseteo el contador de eventos de deteccion de iman
 							/* TODO: verificar segun device a que estado salta, if actual device etc */
-							gotoState(FSM_TESTEO_TAMPER);												
+							if( actualDevice == CMAG )
+							{
+								gotoState( FSM_TESTEO_TAMPER );	
+							}
+							else
+							{
+								gotoState( FSM_TERMINAR_PRUEBA );
+							}													
 						}						
-					}else // No hubo recepción de mensaje por lo que se considera falla de magnetico
-					{
-						info.prueba_exitosa_iman = false;
-						if(!vinoSeparado)
-						{
-							info.error_prueba_iman.separado = true;
-							display_error = display_error_iman_separado;
-						}else if(!vinoJunto)
-						{
-							info.error_prueba_iman.junto = true;
-							display_error = display_error_iman_junto;
-						}
-						gotoState(FSM_ERROR);
 					}
+					
 				}	
 				/**********************************************************************************************/
 				if (stateOut)
@@ -589,7 +638,8 @@ void testerFsm_handler (void)
 					errorPowerFeed();
 				}else if (softTimer_expired(&timerState)) 
 				{			
-					display_error = display_error_mpxh;
+					//display_error = display_error_mpxh;
+					info.tiempo_expirado_check_tamper = true;
 					gotoState(FSM_ERROR);
 				}else
 				{ 
@@ -604,7 +654,7 @@ void testerFsm_handler (void)
 						
 						}else // No hubo recepción de mensaje por lo que se considera falla de magnetico
 						{
-							info.prueba_exitosa_tamper = false;
+							info.error_prueba_tamper = true;
 							gotoState(FSM_ERROR);
 						}			
 					}else
@@ -635,13 +685,6 @@ void testerFsm_handler (void)
 					vinoIdSos = false;
 					vinoIdGec = false;
 				
-					/* Limpio los flags de informe */
-					info.corto_circuito = false;
-					info.dispo_correcto = false;
-					info.error_prueba_iman.junto = false;
-					info.error_prueba_iman.separado = false;
-					info.prueba_exitosa_iman = false;
-					info.prueba_exitosa_tamper = false;
 					comandos1.bits.mandar_pirupiru = 1; // Mando comando para generar sonido de aprobacion		
 				
 					softTimer_init(&timerState, 2000);
@@ -675,23 +718,61 @@ void testerFsm_handler (void)
                 stateIn = false;
                 stateOut = false;	
 				port_pin_set_output_level(POWER, false); // Al entrar en error desenergizo el dispositivo
-	
+				shortCircuitCounter = 0;
+				comandos1.bits.mandar_grave = 1; // Mando sonido grave de error
+				
 				/* Selección del error segun flags info */
 				if( info.corto_circuito == true )
 				{
 					display_error = display_error_corto;
-				}else if( info.tiempo_expirado == true )
-				{
-					display_error = display_error_mpxh;
-				}else if( info.error_prueba_iman.junto == true )
+				}
+				else if( info.error_prueba_iman.junto == true )
 				{
 					display_error = display_error_iman_junto;
-				}else if( info.error_prueba_iman.separado == true )
+				}
+				else if( info.error_prueba_iman.separado == true )
 				{
 					display_error = display_error_iman_separado;
-				}else if( !info.prueba_exitosa_tamper )
+				}
+				else if( info.error_prueba_tamper )
 				{
 					display_error = display_error_tamper;
+				}
+				else if( info.dispo_correcto == false )
+				{
+					display_error = display_error_device;
+				}
+				else if( info.error_recepcion_trama == true )
+				{
+					display_error = display_error_recepcion_trama;
+				}
+				else if( info.tiempo_expirado_check_dispo == true )
+				{
+					display_error = display_tiempo_expirado_check_dispo;
+				}
+				else if( info.tiempo_expirado_check_tamper == true )
+				{
+					display_error = display_tiempo_expirado_check_tamper;
+				}
+				else if( info.tiempo_expirado_check_magnet == true )
+				{
+					display_error = display_tiempo_expirado_check_magnet;
+				}
+				else if( info.tiempo_expirado_check_090 == true)
+				{
+					display_error = display_tiempo_expirado_check_090;
+				}
+				else if( info.no_dispo == true )
+				{
+					display_error = display_no_dispo;
+				}
+				else if( info.tiempo_expirado == true )
+				{
+					display_error = display_error_mpxh;
+				}
+				else
+				{
+					display_error = display_error_default;
 				}
 				
 				/* Limpio los flags de informe */
@@ -701,12 +782,15 @@ void testerFsm_handler (void)
 				info.error_prueba_iman.separado = false;
 				info.prueba_exitosa_iman = false;
 				info.prueba_exitosa_tamper = false;
+				info.error_prueba_tamper = false;
+				info.error_recepcion_trama = false;
+				info.tiempo_expirado_check_dispo = false;
+				info.no_dispo = false;
 				
 				/* Cargo en pantalla el error ocurrido */
 				displayRAM_cargarDR(display_error, 0);
 				displayRAM_cargarComando(TLCD_PERMANENT);	
 				softTimer_init(&timerState, 1000);		
-				comandos1.bits.mandar_grave = 1; // Mando sonido grave de error
 			}
             /**********************************************************************************************/
 			if ( softTimer_expired( &timerState ) )
@@ -716,6 +800,7 @@ void testerFsm_handler (void)
 			{
 				/* Vuelvo a empezar un analisis del mismo tipo de dispositivo */
 				vinoStart = false;
+				actualDevice = UNDEFINED; // Para que vuelva a validar por las dudas que sea el mismo dispositivo colocado
 				gotoState( FSM_ALIMENTAR_DUT );		
 			}else if( vinoChange )
 			{
@@ -751,54 +836,9 @@ void gotoState (fsmState_t nextState)
 void errorPowerFeed (void)
 {
 	port_pin_set_output_level(POWER, false);
-	display_error = display_error_corto;
+	//display_error = display_error_corto;
+	info.corto_circuito = true;
 	gotoState(FSM_ERROR);
-}
-
-void display_productName (uint8_t pos)
-{
-	if(producto == PRODUCT_CMAG) 
-	{
-		for(uint8_t i = 0; i < sizeof(display_cmag) - 1; i++) 
-		{
-			displayRAM_setChar(pos + i, display_cmag[i]);
-		}
-	}
-	else if(producto == PRODUCT_SMAG) 
-	{
-		for(uint8_t i = 0; i < sizeof(display_smag) - 1; i++) 
-		{
-			displayRAM_setChar(pos + i, display_smag[i]);
-		}
-	}
-	else if(producto == PRODUCT_SOS) 
-	{
-		for(uint8_t i = 0; i < sizeof(display_sos) - 1; i++) 
-		{
-			displayRAM_setChar(pos + i, display_sos[i]);
-		}
-	}
-	else if(producto == PRODUCT_SMP) 
-	{
-		for(uint8_t i = 0; i < sizeof(display_smp) - 1; i++) 
-		{
-			displayRAM_setChar(pos + i, display_smp[i]);
-		}
-	}
-	else if(producto == PRODUCT_GEC) 
-	{
-		for(uint8_t i = 0; i < sizeof(display_gec) - 1; i++) 
-		{
-			displayRAM_setChar(pos + i, display_gec[i]);
-		}
-	}
-	else if(producto == PRODUCT_SMAGE)
-	{
-		for(uint8_t i = 0; i < sizeof(display_smage) - 1; i++) 
-		{
-			displayRAM_setChar(pos + i, display_smage[i]);
-		}
-	}
 }
 
 void getFinCarrera ( debouncePin_t* botonCmag, debouncePin_t* botonSmag )

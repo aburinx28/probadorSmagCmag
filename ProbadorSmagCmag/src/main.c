@@ -26,9 +26,13 @@ int main (void)
 	mainTimer_init();
 	debouncePin_init(&botonSmag, DEBOUNCE_PIN_BAJO_ACTIVO, SMAG_ENT);
 	debouncePin_init(&botonCmag, DEBOUNCE_PIN_BAJO_ACTIVO, CMAG_ENT);
-
 	testerFsm_init();
 	
+	softTimer_init(&timerInit, 4000);
+	while(!softTimer_expired(&timerInit)){
+		
+
+	}
 	while (1) 
 	{				
 		if (mainTimer_expired(TIMER_4MSEG)) 
@@ -98,9 +102,16 @@ int main (void)
 					comandos1.bits.mandar_pirupiru = 0;
 					mpxh_ArmaMensaje(0x6c, 0x40, 0, MPXH_BITS_17);
 				}
-				else if (displayRAM_hayChar()) 
+				//else if (displayRAM_hayChar()) 
+				//{
+					//displayRAM_sacarChar();
+				//}
+				else if ( mpxh_tiempoIdle(4*MPXH_MSEG) )
 				{
-					displayRAM_sacarChar();
+					if( displayRAM_hayChar() )
+					{
+						displayRAM_sacarChar();
+					}
 				}
 			}
 		}
